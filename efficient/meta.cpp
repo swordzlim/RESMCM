@@ -39,6 +39,9 @@ typedef struct {
 	edge_type et;
 }HIN_nb;
 //============================================================
+rate alph = -130;
+rate bt = -16;
+rate gmm = 83;
 
 //============================================================
 
@@ -493,7 +496,7 @@ public:
     rate tempB = (((rate) a_rows * b_rows) * a_sparsity * b_cols) * b_sparsity;
     rate tempC = ((rate)(a_rows * c_sparsity)) * b_cols ;
 
-    return tempA + tempB + tempC;
+    return alph * tempA + bt * tempB + gmm * tempC;
 }
 
     op sparse_optimal_matrix_chain_order(vertex len, 
@@ -542,13 +545,6 @@ public:
             }
         }
 
-        // for(vertex i = 0; i < len ; i++){
-        //     for(vertex j = 0; j < len; j ++){
-        //         printf("%12.8f ", m_[i * len + j]);
-        //     }
-        //     printf("\n");
-        // }
-
         return m_[len - 1];
     }
 
@@ -580,9 +576,6 @@ void copy_matrix_row(vertex row_id, vector<vertex> *row, vector<vertex> *&res){
 }
 
 
-// input can be disordered
-// result is disordered
-// i.e. v3
 void row_wise_SpGEMM_based_on_bitmap(vertex row_id, 
                 vector<vertex> *Arow,
                 vector<vertex> **HINB,
@@ -648,9 +641,6 @@ BoolMatrix *SpGEMM(BoolMatrix *mtxA, BoolMatrix *mtxB, vector<vertex> *vector_ar
 }
 
 
-// C = A*B
-// n: # of vertex
-// m: # of edge
 void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
                      vertex_type *vertex_types, edge_type *edge_types,
                      vector<vertex> **bins, vertex *dims,
@@ -685,13 +675,9 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
     vector<pair<int, int>> chain_order;
     dy_op->get_optimal_chain_order(0, p_l - 1, &chain_order);
 
-    for(pair<int, int> p : chain_order){
-        cout << "(" << p.first << ", " << p.second << "), ";
-    }
-    cout << endl;
+    dy_op->free_sparse_optimal_matrix_chain_order(); 
+    delete dy_op;
 
-    // path->pathLen > 1
-    // need SpGEMM
     bool *is_existed = new bool[tnum * n]; 
     #pragma omp parallel
 {   
@@ -700,7 +686,6 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
         is_existed[i] = false;
     }
 }
-
 
     vector<BoolMatrix *> tmp_mtcs;
     vector<vertex_type> tmp_vts;
@@ -770,18 +755,11 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
     free(matrices);
     delete is_existed;
 
-    dy_op->free_sparse_optimal_matrix_chain_order(); 
-    delete dy_op;
-
     gettimeofday(&end, NULL);
     smcm_time = ((end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0);
 }
 
 
-
-
-// n: # of vertex
-// m: # of edge
 void build_pair(vector<HIN_nb> **HIN, BoolMatrix *&graph, 
                 vertex_type *vertex_types, edge_type *edge_types,
                 vector<vertex> **bins, vertex *dims,
@@ -798,8 +776,6 @@ int main(int argc, char **argv){
     string input_meta_path = "";
     string output_file = "";
 
-
-
     if (argc != 8) {
         cerr << "You need to offer ITERATION, THREAD_NUM, INPUT_GRAPH, INPUT_VERTEX, INPUT_EDGE, INPUT_META_PATH and UTPUT_FILE in order!!!" << endl;
         cout << "We use defualt value of these parameters." << endl;
@@ -815,7 +791,6 @@ int main(int argc, char **argv){
 
     double cost = 0;
     
-    // SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS );
     omp_set_num_threads(thread_num);
     cout << "******************** input parameters ***************************" << endl;
     cout << "*\t" <<"# of thread:" << omp_get_max_threads() << endl;
@@ -860,10 +835,8 @@ int main(int argc, char **argv){
 
             build_pair(hgraph, graph, vertex_types, edge_types, bins, dims, &meta_path, hn, hm);
 
-            
             total_spgemm_time += spgemm_time / iterations;
             cost += smcm_time/iterations;
-
 
             vertex_type START_TYPE = meta_path.vertexTypes[0];
             if(i % 20 == 0){

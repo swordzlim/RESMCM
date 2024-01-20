@@ -39,6 +39,9 @@ typedef struct {
 	edge_type et;
 }HIN_nb;
 //============================================================
+rate alph = -130;
+rate bt = -16;
+rate gmm = 83;
 
 //============================================================
 
@@ -514,8 +517,9 @@ public:
                 m_[i * len + j] = numeric_limits<rate>::max();
                 
                 for(vertex k = i; k < j; k ++){
-
-                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + c_[i * len + j];
+                    
+                    rate tmp = alph * c_[i * len + k] + bt / n * c_[i * len + k] * c_[(k + 1) * len + j] + gmm * c_[i * len + j];
+                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + tmp;
 
                     if(cost < m_[i * len + j]){
                         m_[i * len + j] = cost;
@@ -524,7 +528,6 @@ public:
                 }
             }
         }
-
 
         return m_[len - 1];
     }
@@ -750,9 +753,6 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
 
     graph = tmp_mtcs.at(0);
 
-    // for(int i = 1; i < p_l; i ++){
-    //     delete matrices[i];
-    // }
     free(matrices);
     delete is_existed;
 
@@ -763,11 +763,6 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolMatrix *&graph,
     smcm_time = ((end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0);
 }
 
-
-
-
-// n: # of vertex
-// m: # of edge
 void build_pair(vector<HIN_nb> **HIN, BoolMatrix *&graph, 
                 vertex_type *vertex_types, edge_type *edge_types,
                 vector<vertex> **bins, vertex *dims,
@@ -836,7 +831,6 @@ int main(int argc, char **argv){
         total_spgemm_time = 0;
         struct timeval start, end;
 
-        // MetaPath *meta_path = new MetaPath(mp_vt, mp_et);
         for(int i = 0; i < iterations; i++){
             memset(t_rows, 0, tnum * sizeof(long));
             memset(t_times, 0, tnum * sizeof(double));

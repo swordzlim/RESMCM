@@ -44,7 +44,9 @@ typedef struct {
 	edge_type et;
 }HIN_nb;
 //============================================================
-// int THREAD_NUM = 1;
+rate alph = -130;
+rate bt = -16;
+rate gmm = 83;
 
 //============================================================
 
@@ -337,11 +339,11 @@ public:
     }
 };
 
-
 class MNCSketches {
 public:
-    int _rows { 0 };
-    int _cols { 0 };
+    vertex _rows { 0 };
+    vertex _cols { 0 };
+    rate es_nnz { 0 };
 
     // sketch for rows
     vector<int> *_h_r { nullptr };
@@ -349,13 +351,21 @@ public:
     // sketch for columns
     vector<int> *_h_c { nullptr };
 
-    int _h_r_nnz { 0 };
-    int _h_c_nnz { 0 };
+    vector<int> *_h_er { nullptr };
 
-    int _max_h_r { 0 };
-    int _max_h_c { 0 };
-    long double nnz {0};
-    MNCSketches(int rows, int cols) {
+    vector<int> *_h_ec { nullptr };
+
+    vertex _h_r_nnz { 0 };
+    vertex _h_c_nnz { 0 };
+
+    vertex rN1 { 0 };
+    vertex cN1 { 0 };
+
+    vertex _max_h_r { 0 };
+    vertex _max_h_c { 0 };
+
+
+    MNCSketches(int rows, vertex cols) {
         this->_rows = rows;
         this->_cols = cols;
 
@@ -367,13 +377,15 @@ public:
     ~MNCSketches() {
         delete this->_h_r;
         delete this->_h_c;
+        delete this->_h_er;
+        delete this->_h_ec;
 
     }
 
     void rowSketchInc(int i) {
         this->_h_r->at(i)++;
 
-        int cur = this->_h_r->at(i);
+        vertex cur = this->_h_r->at(i);
         if (cur == 1)
             this->_h_r_nnz++;
 
@@ -384,12 +396,20 @@ public:
     void colSketchInc(int i) {
         this->_h_c->at(i)++;
 
-        int cur = this->_h_c->at(i);
+        vertex cur = this->_h_c->at(i);
         if (cur == 1)
             this->_h_c_nnz++;
 
         if (cur > this->_max_h_c)
             this->_max_h_c = cur;
+    }
+
+    void extRowSketchInc(int i) {
+        this->_h_er->at(i)++;
+    }
+
+    void extColSketchInc(int i) {
+        this->_h_ec->at(i)++;
     }
 
 
@@ -401,30 +421,52 @@ public:
         return this->_h_c;
     }
 
-    int getMaxRowSketchValue() {
+    vertex getMaxRowSketchValue() {
         return this->_max_h_r;
     }
 
-    int getMaxColSketchValue() {
+    vertex getMaxColSketchValue() {
         return this->_max_h_c;
     }
 
-    int getRowSketchNNZ() {
+    vertex getRowSketchNNZ() {
         return this->_h_r_nnz;
     }
 
-    int getColSketchNNZ() {
+    vertex getColSketchNNZ() {
         return this->_h_c_nnz;
     }
+    
 
-    static long double getSparsity(MNCSketches* a, MNCSketches* b, int m, int n, int l){
+    static long double getSparsity(MNCSketches* a, MNCSketches* b, vertex m, vertex n, vertex l){
         long double nnz = 0;
 
         if (a->getMaxRowSketchValue() <= 1 || b->getMaxColSketchValue() <= 1) {
             nnz = MNCSketches::dot(a->getColSketch(), b->getRowSketch());
+            
+        } else if(a->_h_ec && b->_h_er){
+            rate mnOut =  (a->_h_r_nnz - a->rN1) * (b->_h_c_nnz - b->cN1);
+
+            rate spOutRest = 0;
+            for(vertex j = 0; j < n; j ++){
+                vertex h1c1ej = (a->_h_ec) ? (*a->_h_ec)[j] : 0;
+                vertex h2r1ej = (b->_h_er) ? (*a->_h_er)[j] : 0;
+                nnz += (rate)h1c1ej * (*b->_h_r)[j];
+                nnz += (rate)((*a->_h_c)[j] - h1c1ej) * h2r1ej;
+                rate lsp = (rate)((*a->_h_c)[j] - h1c1ej) * ((*b->_h_r)[j] - h2r1ej) / mnOut;
+                spOutRest = spOutRest + lsp - spOutRest * lsp;
+            }
+
+            nnz += (rate)(spOutRest * mnOut);
+
         } else {
             long double p = (long double)a->getRowSketchNNZ() * b->getColSketchNNZ();
-            nnz = MNCSketches::densityMap(a->getColSketch(), b->getRowSketch(), p) * p;
+            rate spOut = 0;
+            for(vertex j = 0; j < n; j++){
+                rate lsp = (rate) a->getColSketch()->at(j) * b->getRowSketch()->at(j) / p;
+                spOut = spOut + lsp - spOut * lsp;
+            }
+            nnz = (rate) spOut * p;
         }
 
         long double largerThanCount = MNCSketches::countLargerThan(a->getRowSketch(), n / 2)
@@ -435,48 +477,8 @@ public:
         return ((long double) ((nnz) / (long double) m) * 1 / (long double) l);
     }
 
-    static long double densityMap(vector<int> *a, vector<int> *b, long double p){
 
-        size_t len = a->size();
-        size_t dMapLen = ceil((double)len / p);
-        // size_t dMapLen = 1e5;
-        int step = (p > len) ? len : p;
-
-        // construct density maps
-        long double *aDMap = (long double *)malloc(dMapLen * sizeof(long double));
-        long double *bDMap = (long double *)malloc(dMapLen * sizeof(long double));
-
-        size_t start = 0, end = step;
-
-        for (unsigned int i = 0; i < dMapLen; i++) {
-
-            int vLen = end - start;
-
-            // density-map of first vector
-            aDMap[i] = (long double) MNCSketches::segmentNNZ(a, start, vLen) / (long double)vLen;
-
-            // density-map of second vector
-            bDMap[i] = (long double) MNCSketches::segmentNNZ(b, start, vLen) / (long double)vLen;
-
-            // adjust limits for segments
-            start += step;
-            end = (end + step > len) ? len : end + step;
-        }
-
-        long double density = 0;
-
-        for (unsigned int i=0; i<dMapLen; i++) {
-            long double curDensity = MNCSketches::dotSparsity(aDMap[i], bDMap[i], 1);
-            density = MNCSketches::sumSparsity(density, curDensity);
-        }
-
-        free(aDMap);
-        free(bDMap);
-
-        return density;
-    }
-
-    static long double dotSparsity(long double aSparsity, long double bSparsity, int commonDimension){
+    static long double dotSparsity(long double aSparsity, long double bSparsity, vertex commonDimension){
         return (1 - pow(1 - aSparsity * bSparsity, commonDimension));
     }
 
@@ -484,9 +486,9 @@ public:
         return aSparsity + bSparsity - (aSparsity * bSparsity);
     }
 
-    static long double segmentNNZ(vector<int> *arr, int start, int len){
+    static long double segmentNNZ(vector<int> *arr, vertex start, vertex len){
         long double nnz = 0;
-        for (unsigned int i = start; i < start + len; i++) {
+        for (vertex i = start; i < start + len; i++) {
             if (arr->at(i) != 0){
                 nnz++;
             }
@@ -495,15 +497,16 @@ public:
         return nnz;
     }
 
-    static int countLargerThan(vector<int> *v, int value){
-        int count = 0;
+    static vertex countLargerThan(vector<int> *v, vertex value){
+        vertex count = 0;
 
-        for (unsigned int i = 0; i<v->size(); i++) {
+        for (vertex i = 0; i<v->size(); i++) {
 
             if (v->at(i) > value) {
                 count++;
             }
         }
+
         return count;
     }
 
@@ -521,7 +524,8 @@ public:
         long double resultSparsity = MNCSketches::getSparsity(a, b, m, k, n);
 
         auto *resultSketches = new MNCSketches(m, n);
-        resultSketches->nnz = resultSparsity * m * n;
+        
+        resultSketches->es_nnz =  resultSparsity * m * n;
         resultSketches->propagateRowSketch(a->getRowSketch(), resultSparsity, m, n);
         resultSketches->propagateColSketch(b->getColSketch(), resultSparsity, m, n);
         return resultSketches;
@@ -536,37 +540,58 @@ public:
         return sum;
     }
 
-    void propagateRowSketch(vector<int> *v, double sparsity, int m, int l){
+    void propagateRowSketch(vector<int> *v, double sparsity, vertex m, vertex l){
        long double sum = MNCSketches::sum(v);
-
-        for (unsigned int i = 0; i < v->size(); i++) {
-            int temp = (int) round(v->at(i) * sparsity * m * l / sum);
-
+        
+#pragma omp parallel for schedule(dynamic, 1000)
+        for (vertex i = 0; i < v->size(); i++) {
+            vertex temp = (int) round(v->at(i) * sparsity * m * l / sum);
             if (temp) {
                 this->_h_r->at(i) = temp;
+                // this->_h_r_nnz++;
+                // if (temp > this->_max_h_r) {
+                //     this->_max_h_r = temp;
+                // }
+            }
+        }
+
+        for (vertex i = 0; i < v->size(); i++) {
+            vertex temp = this->_h_r->at(i);
+            if (temp) {
                 this->_h_r_nnz++;
                 if (temp > this->_max_h_r) {
                     this->_max_h_r = temp;
                 }
             }
         }
+
     }
 
-    void propagateColSketch(vector<int> *v, double sparsity, int m, int l){
+    void propagateColSketch(vector<int> *v, double sparsity, vertex m, vertex l){
        long double sum = MNCSketches::sum(v);
 
-        for (unsigned int i = 0; i < v->size(); i++) {
-
-            int temp = (int) round(v->at(i) * sparsity * m * l / sum);
-
+#pragma omp parallel for schedule(dynamic, 1000)
+        for (vertex i = 0; i < v->size(); i++) {
+            vertex temp = (int) round(v->at(i) * sparsity * m * l / sum);
             if (temp) {
                 this->_h_c->at(i) = temp;
+                // this->_h_c_nnz++;
+                // if (temp > this->_max_h_c) {
+                //     this->_max_h_c = temp;
+                // }
+            }
+       }
+
+        for (vertex i = 0; i < v->size(); i++) {
+            vertex temp = this->_h_c->at(i);
+            if (temp) {
                 this->_h_c_nnz++;
                 if (temp > this->_max_h_c) {
                     this->_max_h_c = temp;
                 }
             }
        }
+
     }
 };
 
@@ -650,12 +675,41 @@ public:
                 }
             }
         }
+
+        for (vertex u_id = 0; u_id < n; u_id ++) {
+            vertex cur = this->_sketches->_h_r->at(u_id);
+            if (cur == 1)
+                this->_sketches->rN1 ++;
+        }
+
+        for (vertex v_id = 0; v_id < n; v_id ++) {
+            vertex cur = this->_sketches->_h_c->at(v_id);
+            if (cur == 1)
+                this->_sketches->cN1 ++;
+        }
+
+        // build extended sketches
+        this->_sketches->_h_er = new vector<int>(n,0);
+        this->_sketches->_h_ec = new vector<int>(n,0);
+        auto *rowSketch = this->_sketches->_h_r;
+        auto *colSketch = this->_sketches->_h_c;
+
+        for (vertex u_id = 0; u_id < n; u_id ++) {
+            vector<vertex> *row = rows[u_id];
+            if(row != nullptr){
+                for(vertex v_id : *row) {
+                    if (colSketch->at(v_id) == 1) {
+                        this->_sketches->extRowSketchInc(u_id);
+                    }
+                    if (colSketch->at(u_id) == 1) {
+                        this->_sketches->extColSketchInc(v_id);
+                    }
+                }
+            }
+        }
     }
 
     void free_memory(){
-        if(_sketches != nullptr){
-            delete _sketches;
-        }
 
         if(rows != nullptr){
             for(vertex i = 0; i < n; i ++){
@@ -711,11 +765,9 @@ public:
         return res;
     }
 
-    rate mnc_optimal_matrix_chain_order(vertex len, 
-                                      BoolMatrix ** matrices, 
-                                      vector<vertex> **bins, vertex *dims,
-                                      vector<vertex_type> *p_vts,
-                                      vertex n){
+    edge mnc_optimal_matrix_chain_order(vertex len, 
+                                        BoolMatrix ** matrices, 
+                                        vertex n){
         this->len = len;
         vertex size = len * len;
         m_ = (rate *)malloc(size * sizeof(rate));
@@ -727,6 +779,11 @@ public:
                 E[i] = nullptr;
         }
 
+        for(vertex i = 0; i < len; i ++){
+            matrices[i]->buildSketches();
+            E[i * len + i] = matrices[i]->_sketches;
+        }
+
         for(vertex l = 1; l < len; l ++){
             for(vertex i = 0; i < len - l; i ++){
                 vertex j = i + l;
@@ -734,55 +791,32 @@ public:
                 
                 for(vertex k = i; k < j; k ++){
                     MNCSketches *aSketches = E[i * len + k];
-                    if (!aSketches) {
-                        if (!(aSketches = matrices[i]->_sketches)) {
-                            matrices[i]->buildSketches();
-                            aSketches = matrices[i]->_sketches;
-                        }
-                    }
 
                     MNCSketches *bSketches = E[(k + 1) * len + j];
-                    if (!bSketches) {
-                        if (!(bSketches = matrices[j]->_sketches)) {
-                            matrices[j]->buildSketches();
-                            bSketches = matrices[j]->_sketches;
-                        }
-                    }
+                    
+                    MNCSketches *tmp_Sk = MNCSketches::propagate(aSketches, bSketches, n, n, n);
 
-                    vector<int> *aColSketch = aSketches->getColSketch();
-                    vector<int> *bRowSketch = bSketches->getRowSketch();
-
-                    long double cur_cost = MNCSketches::dot(aColSketch, bRowSketch);
-
-                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + cur_cost;
+                    rate tmp = alph * aSketches->es_nnz + bt / n * aSketches->es_nnz * bSketches->es_nnz + gmm * tmp_Sk->es_nnz;
+                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + tmp;
 
                     if (cost < m_[i * len + j] ) {
                         m_[i * len + j] = cost;
                         s_[i * len + j] = k;
-                        E[i * len + j] = MNCSketches::propagate(aSketches, bSketches, n, n, n);
+                        E[i * len + j] = tmp_Sk;
                     }
                 }
             }
         }
 
-        // for(vertex i = 0; i < len ; i++){
-        //     for(vertex j = 0; j < len; j ++){
-        //         printf("%12f", m_[i * len + j]);
-        //     }
-        //     printf("\n");
-        // }  
-
-        rate res = E[len - 1]->nnz;
-
-        for(vertex i = 0; i < size; ++i) {
-            if(E[i] != nullptr) {
+        rate es_nnz = E[len - 1]->es_nnz;
+        for(int i = 0; i < size; i++){
+            if(E[i] != nullptr){
                 delete E[i];
             }
         }
-
         free(E);
 
-        return res;
+        return es_nnz;
     }
 
     void free_row_sparse_optimal_matrix_chain_order(){
@@ -821,6 +855,136 @@ public:
 };
 
 
+void copy_matrix_row(vertex row_id, vector<vertex> *row, vector<vertex> *&res){
+    *res = *row;
+}
+
+
+// input can be disordered
+// result is disordered
+// i.e. v3
+void row_wise_SpGEMM_based_on_bitmap(vertex row_id, 
+                vector<vertex> *Arow,
+                vector<vertex> **HINB,
+                bool *is_existed,
+                vector<vertex> *&res){
+    
+    vector<vertex> *queue = new vector<vertex>;
+    // row-wise SpGMM
+    for(vertex u_id: *Arow){
+        vector<vertex> *Brow = HINB[u_id];
+        // cur_idx ++;
+        edge bsize = Brow->size();
+        for(vertex v_id: *Brow){
+            if(is_existed[v_id]){
+                continue;
+            }
+            is_existed[v_id] = true;
+            queue->push_back(v_id);
+        } 
+    } // O(N), N is the total num of vertex in each Brow in this iteration, which is a similar sector in with_merge
+    
+    // reduce memory cost
+    delete res;
+    queue->shrink_to_fit();
+    res = queue;
+        
+    for(vertex u_id: *res){
+        is_existed[u_id] = false;
+    }// O(N), N is the total num of vertex in each Brow in this iteration
+}
+
+
+struct Cmp{
+    bool operator()(vector<HIN_nb> *a, vector<HIN_nb> *b){
+        if(a->size() > b->size()){
+            return true;
+        }
+        return false;
+    }
+};
+
+vector<HIN_nb> *merge_two_queue(vector<HIN_nb> *q1, vector<HIN_nb> *q2){
+    vector<HIN_nb> *res = new vector<HIN_nb>();
+    int idx1 = 0, idx2 = 0;
+    while(idx1 < q1->size() && idx2 < q2->size()){
+        HIN_nb nb1 = (*q1)[idx1];
+        int v1 = nb1.vid;
+        HIN_nb nb2 = (*q2)[idx2];
+        int v2 = nb2.vid;
+        if(v1 < v2){
+            if(res->empty() || res->back().vid != v1){
+                res->push_back(nb1);
+            }
+            idx1 ++;
+        }else{
+            res->push_back(nb2);
+            if(res->empty() || res->back().vid != v2){
+                res->push_back(nb2);
+            }
+            idx2 ++;
+        }
+    }
+    while(idx1 < q1->size()){
+        HIN_nb nb1 = (*q1)[idx1 ++];
+        int v1 = nb1.vid;
+        if(res->empty() || res->back().vid != nb1.vid){
+            res->push_back(nb1);
+        }
+    }
+    while(idx2 < q2->size()){
+        HIN_nb nb2 = (*q2)[idx2 ++];
+        int v2 = nb2.vid;
+        if(res->empty() || res->back().vid != nb2.vid){
+            res->push_back(nb2);
+        }
+    }
+
+    // free q1 and q2
+    q1->clear();
+    q1->shrink_to_fit();
+    q2->clear();
+    q2->shrink_to_fit();
+
+    return res;
+}
+
+
+bool less_HIN(HIN_nb x, HIN_nb y){
+    return x.vid < y.vid;
+}
+
+BoolMatrix *SpGEMM(BoolMatrix *mtxA, BoolMatrix *mtxB, vector<vertex> *vector_arr, bool *is_existed, vertex n){
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
+    int tnum = omp_get_max_threads();
+    BoolMatrix *res = new BoolMatrix(n);
+    vector<vertex> **rows = res->rows;
+    vector<vertex> **rowsA = mtxA->rows;
+    vector<vertex> **rowsB = mtxB->rows;
+
+    vertex chunk_size = ceil(1.0*(double)vector_arr->size() / (tnum * 8));
+#pragma omp parallel for schedule(dynamic, chunk_size)
+// #pragma omp parallel for schedule(static, 1000)
+    for(vertex vid : *vector_arr){
+        struct timeval t_start, t_end;
+        gettimeofday(&t_start, NULL);
+        int id = omp_get_thread_num();
+        bool *cur_is_existed = is_existed + id * n;
+        row_wise_SpGEMM_based_on_bitmap(vid, rowsA[vid], rowsB, cur_is_existed,  rows[vid]);
+        gettimeofday(&t_end, NULL);
+        int tid = omp_get_thread_num();
+        t_times[tid] += t_end.tv_sec - t_start.tv_sec + (double)(t_end.tv_usec - t_start.tv_usec)/1e6;
+        t_rows[tid] += rowsA[vid]->size();
+    }
+
+    gettimeofday(&end, NULL);
+    spgemm_time += (end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0;
+    return res;
+}
+
+
 // C = A*B
 // n: # of vertex
 // m: # of edge
@@ -846,7 +1010,7 @@ rate final_result_estimate(vector<HIN_nb> **HIN,
     struct timeval start, end;
     gettimeofday(&start, NULL);
 
-    rate res = dy_op->mnc_optimal_matrix_chain_order(p_l, matrices, bins, dims, &p_vts, n);
+    rate res = dy_op->mnc_optimal_matrix_chain_order(p_l, matrices, n);
 
     gettimeofday(&end, NULL);
     estimate_time += (end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0;
@@ -864,8 +1028,6 @@ rate final_result_estimate(vector<HIN_nb> **HIN,
 }
 
 
-// n: # of vertex
-// m: # of edge
 rate estimator(vector<HIN_nb> **HIN,
                 vertex_type *vertex_types, edge_type *edge_types,
                 vector<vertex> **bins, vertex *dims,
@@ -876,14 +1038,13 @@ rate estimator(vector<HIN_nb> **HIN,
 
 
 int main(int argc, char **argv){
-    int thread_num = 64;
+    vertex thread_num = 64;
     double iterations = 1;
     string input_graph = "";
     string input_vertex = "";
     string input_edge = "";
     string input_meta_path = "";
     string output_file = "";
-
  
     if (argc != 8) {
         cerr << "You need to offer ITERATION, THREAD_NUM, INPUT_GRAPH, INPUT_VERTEX, INPUT_EDGE, INPUT_META_PATH and UTPUT_FILE in order!!!" << endl;
@@ -930,7 +1091,6 @@ int main(int argc, char **argv){
     for(MetaPath meta_path: pathes){
         vertex n = 0;
         edge m = 0;
-        double cost = 0;
         total_estimate_time = 0;
         struct timeval start, end;
         rate hat_nnz = 0;
@@ -948,8 +1108,6 @@ int main(int argc, char **argv){
             // measure time cost
             gettimeofday(&end, NULL);
             total_estimate_time += estimate_time / iterations;
-            cost += ((end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0)/iterations;
-
 
             vertex_type START_TYPE = meta_path.vertexTypes[0];
             if(i % 20 == 0){
@@ -957,12 +1115,9 @@ int main(int argc, char **argv){
                 cout << "time cost of :" << i <<"th process: " << (end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec)/1000000.0 << "s" << endl;
                 cout << i << "th m: " << m << endl;
             }
-            // graph->write_graph_cnt("./test_cnt_v3.txt");
         }
 
-
         cout << "time cost of estimate: " << total_estimate_time << "s" << endl;
-        cout << "time cost:" << cost << "s" << endl;
 
         try{
             ofstream outfile;

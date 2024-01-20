@@ -39,6 +39,9 @@ typedef struct {
 	edge_type et;
 }HIN_nb;
 //============================================================
+rate alph = -130;
+rate bt = -16;
+rate gmm = 83;
 
 //============================================================
 
@@ -582,8 +585,9 @@ public:
                 m_[i * len + j] = numeric_limits<rate>::max();
                 
                 for(vertex k = i; k < j; k ++){
-
-                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + c_[i * len + j];
+                    
+                    rate tmp = alph * c_[i * len + k] + bt / n * c_[i * len + k] * c_[(k + 1) * len + j] + gmm * c_[i * len + j];
+                    rate cost = m_[i * len + k] + m_[(k + 1) * len + j] + tmp;
 
                     if(cost < m_[i * len + j]){
                         m_[i * len + j] = cost;
@@ -754,8 +758,6 @@ void SSP_dynamic(vector<HIN_nb> **HIN, BoolCSR *&graph,
 
     DynamicOptimizer *dy_op = new DynamicOptimizer();
     dy_op->rows_sparse_optimal_matrix_chain_order(p_l, t_matrices, bins, dims, &p_vts, n);
-
-
 
     BoolCSR **matrices = (BoolCSR **)malloc(p_l * sizeof(BoolCSR *));
     
