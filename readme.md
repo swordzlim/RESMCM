@@ -45,14 +45,14 @@ nohup \
 or
 ```
 nohup \
-./accuracy/resmcm \
+./accuracy/res \
 64 \
 1 \
 ./data/HINTrussICDE2020/DBLP/graph.txt \
 ./data/HINTrussICDE2020/DBLP/vertex.txt \
 ./data/HINTrussICDE2020/DBLP/edge.txt \
 ./materials/input/DBLP.txt \
-./materials/output/accuracy/DBLP/resmcm_acc.txt
+./materials/output/accuracy/DBLP/res_acc.txt
 ```
 
 
